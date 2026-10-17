@@ -28,6 +28,7 @@
       this.state = initialCubeState.clone();
       this.onCameraFaceChange = options.onCameraFaceChange || null;
       this.currentFrontFace = 'F';
+      this.topColor = options.initialTopColor || 'W'; // 'W' for Steps 1–4, 'Y' for Steps 5–8
       this.isAnimating = false;
       this.animationSpeed = 1.0; // Multiplier (0.5x to 3x)
 
@@ -47,6 +48,19 @@
       return baseFov;
     }
 
+    getWorldPresetPos(frontFace, topColor = this.topColor) {
+      if (frontFace === 'D') {
+        return CAMERA_PRESETS.D.pos;
+      }
+      if (topColor === 'W') {
+        // When rotated 180° around Z (White on top), local R (+X, Green) is at world -X (L) and local L (-X, Blue) is at world +X (R)
+        if (frontFace === 'R') return CAMERA_PRESETS.L.pos;
+        if (frontFace === 'L') return CAMERA_PRESETS.R.pos;
+      }
+      const preset = CAMERA_PRESETS[frontFace] || CAMERA_PRESETS.F;
+      return preset.pos;
+    }
+
     initScene() {
       const width = Math.min(this.container.clientWidth || 320, window.innerWidth || 520);
       const height = this.container.clientHeight || 240;
@@ -55,7 +69,7 @@
       this.scene = new THREE.Scene();
 
       this.camera = new THREE.PerspectiveCamera(this.getAdaptiveFov(aspect), aspect, 0.1, 100);
-      this.camera.position.set(...CAMERA_PRESETS.F.pos);
+      this.camera.position.set(...this.getWorldPresetPos('F', this.topColor));
       this.camera.lookAt(0, 0, 0);
 
       this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -76,22 +90,27 @@
       dirLight2.position.set(-9, -10, -8);
       this.scene.add(dirLight2);
 
+      // Orientation group flips the whole cube between White on top (rotZ = PI) and Yellow on top (rotZ = 0)
+      this.orientationGroup = new THREE.Group();
+      this.orientationGroup.rotation.z = this.topColor === 'W' ? Math.PI : 0;
+      this.scene.add(this.orientationGroup);
+
       // Root group & pivot group for rotating faces
       this.cubeGroup = new THREE.Group();
-      this.scene.add(this.cubeGroup);
+      this.orientationGroup.add(this.cubeGroup);
 
       this.pivotGroup = new THREE.Group();
-      this.scene.add(this.pivotGroup);
+      this.orientationGroup.add(this.pivotGroup);
 
       // Subtle orientation ring under the cube
       const ringGeo = new THREE.RingGeometry(2.35, 2.42, 64);
-      const ringMat = new THREE.MeshBasicMaterial({
-        color: 0xfce000,
+      this.ringMat = new THREE.MeshBasicMaterial({
+        color: this.topColor === 'W' ? 0xffffff : 0xfce000,
         side: THREE.DoubleSide,
         transparent: true,
         opacity: 0.14
       });
-      const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+      const ringMesh = new THREE.Mesh(ringGeo, this.ringMat);
       ringMesh.rotation.x = Math.PI / 2;
       ringMesh.position.y = -2.15;
       this.scene.add(ringMesh);
@@ -156,14 +175,18 @@
       const { x, z } = this.camera.position;
       let detected = 'F';
       if (Math.abs(x) > Math.abs(z)) {
-        detected = x > 0 ? 'R' : 'L';
+        if (this.topColor === 'W') {
+          detected = x > 0 ? 'L' : 'R';
+        } else {
+          detected = x > 0 ? 'R' : 'L';
+        }
       } else {
         detected = z > 0 ? 'F' : 'B';
       }
       if (detected !== this.currentFrontFace) {
         this.currentFrontFace = detected;
         if (this.onCameraFaceChange) {
-          this.onCameraFaceChange(detected);
+          this.onCameraFaceChange(detected, this.topColor);
         }
       }
     }
@@ -247,21 +270,37 @@
     }
 
     /**
-     * Smoothly orbit the camera to face `frontFace` ('F', 'R', 'B', 'L', or 'D')
-     * using spherical coordinates so camera distance stays constant and never passes through the pole.
+     * Smoothly orient the cube's top center face ('W' for Steps 1–4, 'Y' for Steps 5–8)
+     * and orbit the camera to face `frontFace` ('F', 'R', 'B', 'L', or 'D').
      */
-    orbitToFace(frontFace, durationMs = 380) {
-      const preset = CAMERA_PRESETS[frontFace] || CAMERA_PRESETS.F;
+    orientCube(frontFace = this.currentFrontFace, topColor = this.topColor, durationMs = 380) {
+      const targetTop = topColor === 'W' ? 'W' : 'Y';
+      const targetRotZ = targetTop === 'W' ? Math.PI : 0;
+      const startRotZ = this.orientationGroup ? this.orientationGroup.rotation.z : targetRotZ;
+
+      this.topColor = targetTop;
+      if (this.ringMat) {
+        this.ringMat.color.set(targetTop === 'W' ? 0xffffff : 0xfce000);
+      }
+
       if (frontFace !== 'D') {
         this.currentFrontFace = frontFace;
-        if (this.onCameraFaceChange) {
-          this.onCameraFaceChange(frontFace);
-        }
+      }
+      if (this.onCameraFaceChange) {
+        this.onCameraFaceChange(this.currentFrontFace, this.topColor);
       }
 
       const startPos = this.camera.position.clone();
-      const endPos = new THREE.Vector3(...preset.pos);
-      if (startPos.distanceTo(endPos) < 0.05) {
+      const endPos = new THREE.Vector3(...this.getWorldPresetPos(frontFace, targetTop));
+      const rotDiff = Math.abs(targetRotZ - startRotZ);
+
+      if (durationMs <= 0 || (startPos.distanceTo(endPos) < 0.05 && rotDiff < 0.02)) {
+        if (this.orientationGroup) {
+          this.orientationGroup.rotation.z = targetRotZ;
+        }
+        this.camera.position.copy(endPos);
+        this.spherical.setFromVector3(this.camera.position);
+        this.camera.lookAt(0, 0, 0);
         return Promise.resolve();
       }
 
@@ -278,6 +317,9 @@
         const step = (now) => {
           const t = Math.min(1, (now - startTime) / durationMs);
           const ease = 1 - Math.pow(1 - t, 3);
+          if (this.orientationGroup) {
+            this.orientationGroup.rotation.z = startRotZ + (targetRotZ - startRotZ) * ease;
+          }
           this.spherical.radius = startSpherical.radius + (endSpherical.radius - startSpherical.radius) * ease;
           this.spherical.phi = startSpherical.phi + (endSpherical.phi - startSpherical.phi) * ease;
           this.spherical.theta = startSpherical.theta + deltaTheta * ease;
@@ -291,6 +333,14 @@
         };
         requestAnimationFrame(step);
       });
+    }
+
+    setTopColor(topColor, durationMs = 380) {
+      return this.orientCube(this.currentFrontFace, topColor, durationMs);
+    }
+
+    orbitToFace(frontFace, durationMs = 380) {
+      return this.orientCube(frontFace, this.topColor, durationMs);
     }
 
     /**

@@ -71,8 +71,8 @@
       <div class="stage-card">
         <div class="stage-hud-top">
           <div class="hud-badges">
-            <span class="hud-pill" title="For every step in this guide, the Yellow center stays on UP">
-              <span class="color-dot dot-yellow"></span> UP: <strong>Yellow</strong>
+            <span class="hud-pill" id="hud-up-badge" title="Steps 1–4: White on UP | Steps 5–8: Yellow on UP">
+              <span class="color-dot dot-white"></span> UP: <strong>White</strong>
             </span>
             <span class="hud-pill" id="hud-front-badge">
               <span class="color-dot dot-red"></span> Front: <strong>Red</strong>
@@ -92,8 +92,8 @@
             <button type="button" class="cam-btn" data-camera-face="L" title="Look at Blue Center (Left)">
               <span class="color-dot dot-blue"></span> <span class="cam-label">Blue</span>
             </button>
-            <button type="button" class="cam-btn" data-camera-face="D" title="Peek at White Center (Bottom Cross)">
-              <span class="color-dot dot-white"></span> <span class="cam-label">Bottom</span>
+            <button type="button" class="cam-btn" data-camera-face="D" title="Peek at Bottom Center">
+              <span class="color-dot dot-yellow" id="cam-bottom-dot"></span> <span class="cam-label">Bottom</span>
             </button>
           </div>
         </div>

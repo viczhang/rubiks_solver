@@ -14,6 +14,7 @@
     cube: new CubeState(),
     view3d: null,
     activeFrontFace: 'F',
+    activeTopColor: 'W', // 'W' for Steps 1–4, 'Y' for Steps 5–8
 
     // Solver timeline state
     solution: null,
@@ -35,6 +36,10 @@
     painterGrid: null,
     selectedPaintColor: 'R'
   };
+
+  function getTopColorForStage(stageNumber) {
+    return stageNumber <= 4 ? 'W' : 'Y';
+  }
 
   document.addEventListener('DOMContentLoaded', initApp);
 
@@ -62,8 +67,10 @@
 
     const viewportEl = document.getElementById('cube-3d-viewport');
     appState.view3d = new Cube3DView(viewportEl, appState.cube, {
-      onCameraFaceChange: (detectedFace) => {
+      initialTopColor: 'W',
+      onCameraFaceChange: (detectedFace, topColor) => {
         appState.activeFrontFace = detectedFace;
+        if (topColor) appState.activeTopColor = topColor;
         updateOrientationHUD();
       }
     });
@@ -97,7 +104,6 @@
     stopPlayback();
     const scrambleMoves = appState.cube.reset().scramble(20);
     appState.view3d.syncFromState(appState.cube);
-    await appState.view3d.orbitToFace('F', 300);
     renderMiniNet(appState.cube);
 
     if (appState.mode !== 'solver') {
@@ -246,7 +252,21 @@
 
   function updateOrientationHUD() {
     const face = appState.activeFrontFace || 'F';
+    const topColor = appState.activeTopColor || 'W';
     const info = PERSPECTIVE_MAP[face] || PERSPECTIVE_MAP.F;
+
+    const upBadgeEl = document.getElementById('hud-up-badge');
+    if (upBadgeEl) {
+      const upCss = topColor === 'W' ? 'white' : 'yellow';
+      const upName = topColor === 'W' ? 'White' : 'Yellow';
+      upBadgeEl.innerHTML = `<span class="color-dot dot-${upCss}"></span> UP: <strong>${upName}</strong>`;
+    }
+
+    const bottomDotEl = document.getElementById('cam-bottom-dot');
+    if (bottomDotEl) {
+      bottomDotEl.className = `color-dot dot-${topColor === 'W' ? 'yellow' : 'white'}`;
+    }
+
     const badgeEl = document.getElementById('hud-front-badge');
     if (badgeEl) {
       badgeEl.innerHTML = `<span class="color-dot dot-${COLORS[info.frontColor].css}"></span> Front: <strong>${info.frontName}</strong>`;
@@ -285,6 +305,12 @@
       const solver = new RubiksGuideSolver(appState.cube);
       appState.solution = solver.solve();
       appState.currentMoveCursor = -1;
+      const firstMove = appState.solution.flatMoves[0];
+      const initialTop = firstMove ? getTopColorForStage(firstMove.stageNumber) : 'W';
+      const initialFront = firstMove ? firstMove.frontFace : 'F';
+      if (appState.view3d) {
+        appState.view3d.orientCube(initialFront, initialTop, 300);
+      }
       renderSolverPane(scrambleMoves);
       updateTimelineUI();
     } catch (err) {
@@ -352,6 +378,10 @@
       appState.currentMoveCursor = -1;
       appState.cube = appState.solution.initialState.clone();
       appState.view3d.syncFromState(appState.cube);
+      const firstMove = moves[0];
+      const targetTop = firstMove ? getTopColorForStage(firstMove.stageNumber) : 'W';
+      const targetFront = firstMove ? firstMove.frontFace : 'F';
+      appState.view3d.orientCube(targetFront, targetTop, 280);
       renderMiniNet(appState.cube);
       updateTimelineUI();
       return;
@@ -359,10 +389,12 @@
 
     const clamped = Math.min(moves.length - 1, moveIndex);
     const targetMove = moves[clamped];
+    const nextMove = clamped + 1 < moves.length ? moves[clamped + 1] : targetMove;
+    const targetTop = getTopColorForStage(nextMove.stageNumber);
     appState.currentMoveCursor = clamped;
     appState.cube = targetMove.stateAfter.clone();
     appState.view3d.syncFromState(appState.cube);
-    appState.view3d.orbitToFace(targetMove.frontFace, 280);
+    appState.view3d.orientCube(nextMove.frontFace, targetTop, 280);
     renderMiniNet(appState.cube);
     updateTimelineUI();
   }
@@ -374,11 +406,12 @@
 
     const nextIdx = appState.currentMoveCursor + 1;
     const moveObj = moves[nextIdx];
+    const targetTop = getTopColorForStage(moveObj.stageNumber);
     appState.currentMoveCursor = nextIdx;
     updateTimelineUI();
 
-    if (appState.activeFrontFace !== moveObj.frontFace) {
-      await appState.view3d.orbitToFace(moveObj.frontFace, 300);
+    if (appState.activeFrontFace !== moveObj.frontFace || appState.activeTopColor !== targetTop) {
+      await appState.view3d.orientCube(moveObj.frontFace, targetTop, 360);
     }
     await appState.view3d.animateMove(moveObj.absMove, 300);
     appState.cube = moveObj.stateAfter.clone();
@@ -393,12 +426,13 @@
     if (appState.currentMoveCursor < 0) return false;
 
     const moveObj = moves[appState.currentMoveCursor];
+    const targetTop = getTopColorForStage(moveObj.stageNumber);
     const invAbsMove = CubeState.invertMove(moveObj.absMove);
     appState.currentMoveCursor--;
     updateTimelineUI();
 
-    if (appState.activeFrontFace !== moveObj.frontFace) {
-      await appState.view3d.orbitToFace(moveObj.frontFace, 260);
+    if (appState.activeFrontFace !== moveObj.frontFace || appState.activeTopColor !== targetTop) {
+      await appState.view3d.orientCube(moveObj.frontFace, targetTop, 320);
     }
     await appState.view3d.animateMove(invAbsMove, 260);
     appState.cube = moveObj.stateBefore.clone();
@@ -499,6 +533,9 @@
       const focusSubStep = sol.subSteps[focusMove.subStepIndex];
       const isDone = appState.currentMoveCursor >= total - 1;
       const colorCss = COLORS[focusMove.frontColor].css;
+      const stageTopColor = getTopColorForStage(focusMove.stageNumber);
+      const topCss = stageTopColor === 'W' ? 'white' : 'yellow';
+      const topName = stageTopColor === 'W' ? 'White' : 'Yellow';
 
       let subStepPillsHtml = '';
       if (focusSubStep) {
@@ -520,6 +557,7 @@
         : `<div class="banner-step-active">
              <div class="banner-top-row">
                <span class="stage-tag">Step ${focusMove.stageNumber} of 8</span>
+               <span class="front-indicator"><span class="color-dot dot-${topCss}"></span> <strong>${topName}</strong> Top</span>
                <span class="front-indicator"><span class="color-dot dot-${colorCss}"></span> <strong>${focusMove.frontColorName}</strong> Front</span>
                <div class="caption-pills-strip">${subStepPillsHtml}</div>
              </div>
@@ -858,10 +896,11 @@
         if (appState.view3d.isAnimating) return;
         stopPlayback();
         const d = step.drill;
+        const targetTop = getTopColorForStage(step.number);
         appState.cube.reset().applyMoves(d.setupMoves);
         appState.view3d.syncFromState(appState.cube);
         renderMiniNet(appState.cube);
-        await appState.view3d.orbitToFace(d.frontFace || 'F', 320);
+        await appState.view3d.orientCube(d.frontFace || 'F', targetTop, 320);
 
         showToast(`Animating ${step.badge}: ${step.title} (${d.hintMoves.join(' ')})`);
         for (const m of d.hintMoves) {
@@ -1012,11 +1051,12 @@
     stopPlayback();
     const drills = getAllDrills();
     const activeDrill = drills.find(d => d.id === appState.activeDrillId) || drills[0];
+    const targetTop = activeDrill.stepNumber ? getTopColorForStage(activeDrill.stepNumber) : 'W';
     appState.drillMoveProgress = 0;
     appState.drillCompleted = false;
     appState.cube.reset().applyMoves(activeDrill.setupMoves);
     appState.view3d.syncFromState(appState.cube);
-    appState.view3d.orbitToFace(activeDrill.frontFace || 'F', 300);
+    appState.view3d.orientCube(activeDrill.frontFace || 'F', targetTop, 300);
     renderMiniNet(appState.cube);
     renderPracticePanel();
   }
