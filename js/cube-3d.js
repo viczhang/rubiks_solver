@@ -1,0 +1,383 @@
+/**
+ * Three.js Interactive 3D Rubik's Cube View & Animator
+ * Syncs with RubiksCore.CubeState and supports:
+ *   - Smooth animated layer turns (F, U, R, L, B, D + ' + 2)
+ *   - Smooth camera orientation to any active Front face (Red, Green, Orange, Blue)
+ *     while keeping Yellow on UP (or peeking at the bottom White Cross)
+ *   - Interactive OrbitControls
+ */
+(function (root, factory) {
+  root.RubiksView3D = factory(root.THREE, root.RubiksCore);
+})(typeof self !== 'undefined' ? self : this, function (THREE, RubiksCore) {
+  'use strict';
+
+  const { COLORS, FACE_NORMALS, CubeState } = RubiksCore;
+
+  // Camera target positions for each Front face (with Yellow +Y on top and slight upper-right isometric angle)
+  const CAMERA_PRESETS = {
+    F: { pos: [4.25, 3.85, 6.1], label: 'Red Front (Yellow UP)' },
+    R: { pos: [6.1, 3.85, -4.25], label: 'Green Front (Yellow UP)' },
+    B: { pos: [-4.25, 3.85, -6.1], label: 'Orange Front (Yellow UP)' },
+    L: { pos: [-6.1, 3.85, 4.25], label: 'Blue Front (Yellow UP)' },
+    D: { pos: [4.1, -5.4, 5.3], label: 'Bottom Peek (White Cross)' }
+  };
+
+  class Cube3DView {
+    constructor(containerEl, initialCubeState, options = {}) {
+      this.container = containerEl;
+      this.state = initialCubeState.clone();
+      this.onCameraFaceChange = options.onCameraFaceChange || null;
+      this.currentFrontFace = 'F';
+      this.isAnimating = false;
+      this.animationSpeed = 1.0; // Multiplier (0.5x to 3x)
+
+      this.initScene();
+      this.buildCubies();
+      this.syncFromState(this.state);
+      this.startRenderLoop();
+      this.bindResize();
+    }
+
+    getAdaptiveFov(aspect) {
+      // Widen vertical FOV automatically when viewport is square or portrait so horizontal margins stay generous
+      const baseFov = 38;
+      if (aspect < 1.15) {
+        return Math.min(54, baseFov / Math.max(0.72, aspect * 0.92));
+      }
+      return baseFov;
+    }
+
+    initScene() {
+      const width = Math.min(this.container.clientWidth || 320, window.innerWidth || 520);
+      const height = this.container.clientHeight || 240;
+      const aspect = width / height;
+
+      this.scene = new THREE.Scene();
+
+      this.camera = new THREE.PerspectiveCamera(this.getAdaptiveFov(aspect), aspect, 0.1, 100);
+      this.camera.position.set(...CAMERA_PRESETS.F.pos);
+      this.camera.lookAt(0, 0, 0);
+
+      this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      this.renderer.setSize(width, height);
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      this.container.innerHTML = '';
+      this.container.appendChild(this.renderer.domElement);
+
+      // Lighting
+      const ambient = new THREE.AmbientLight(0xffffff, 0.82);
+      this.scene.add(ambient);
+
+      const dirLight1 = new THREE.DirectionalLight(0xffffff, 0.65);
+      dirLight1.position.set(8, 14, 10);
+      this.scene.add(dirLight1);
+
+      const dirLight2 = new THREE.DirectionalLight(0x90a8ff, 0.32);
+      dirLight2.position.set(-9, -10, -8);
+      this.scene.add(dirLight2);
+
+      // Root group & pivot group for rotating faces
+      this.cubeGroup = new THREE.Group();
+      this.scene.add(this.cubeGroup);
+
+      this.pivotGroup = new THREE.Group();
+      this.scene.add(this.pivotGroup);
+
+      // Subtle orientation ring under the cube
+      const ringGeo = new THREE.RingGeometry(2.35, 2.42, 64);
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: 0xfce000,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.14
+      });
+      const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+      ringMesh.rotation.x = Math.PI / 2;
+      ringMesh.position.y = -2.15;
+      this.scene.add(ringMesh);
+
+      // OrbitControls (loaded via Three.js OrbitControls or built-in spherical pointer drag)
+      this.initOrbitControls();
+    }
+
+    initOrbitControls() {
+      // Lightweight, super-responsive spherical orbit controller so it works reliably with any Three.js build
+      this.spherical = new THREE.Spherical();
+      this.spherical.setFromVector3(this.camera.position);
+
+      let isDragging = false;
+      let prevX = 0;
+      let prevY = 0;
+      const dom = this.renderer.domElement;
+
+      const onPointerDown = (e) => {
+        if (e.button !== undefined && e.button !== 0) return;
+        isDragging = true;
+        prevX = e.clientX;
+        prevY = e.clientY;
+        dom.style.cursor = 'grabbing';
+      };
+
+      const onPointerMove = (e) => {
+        if (!isDragging) return;
+        const dx = e.clientX - prevX;
+        const dy = e.clientY - prevY;
+        prevX = e.clientX;
+        prevY = e.clientY;
+
+        this.spherical.theta -= dx * 0.0075;
+        this.spherical.phi = Math.max(0.2, Math.min(Math.PI - 0.2, this.spherical.phi - dy * 0.0075));
+        this.camera.position.setFromSpherical(this.spherical);
+        this.camera.lookAt(0, 0, 0);
+        this.detectDominantFrontFace();
+      };
+
+      const onPointerUp = () => {
+        if (!isDragging) return;
+        isDragging = false;
+        dom.style.cursor = 'grab';
+      };
+
+      const onWheel = (e) => {
+        e.preventDefault();
+        this.spherical.radius = Math.max(4.5, Math.min(10.5, this.spherical.radius + e.deltaY * 0.004));
+        this.camera.position.setFromSpherical(this.spherical);
+        this.camera.lookAt(0, 0, 0);
+      };
+
+      dom.style.cursor = 'grab';
+      dom.addEventListener('pointerdown', onPointerDown);
+      window.addEventListener('pointermove', onPointerMove);
+      window.addEventListener('pointerup', onPointerUp);
+      dom.addEventListener('wheel', onWheel, { passive: false });
+    }
+
+    detectDominantFrontFace() {
+      const { x, z } = this.camera.position;
+      let detected = 'F';
+      if (Math.abs(x) > Math.abs(z)) {
+        detected = x > 0 ? 'R' : 'L';
+      } else {
+        detected = z > 0 ? 'F' : 'B';
+      }
+      if (detected !== this.currentFrontFace) {
+        this.currentFrontFace = detected;
+        if (this.onCameraFaceChange) {
+          this.onCameraFaceChange(detected);
+        }
+      }
+    }
+
+    buildCubies() {
+      this.cubieMeshes = [];
+      const spacing = 1.02;
+      const bodyGeo = new THREE.BoxGeometry(0.96, 0.96, 0.96);
+      const bodyMat = new THREE.MeshStandardMaterial({
+        color: 0x12141c,
+        roughness: 0.35,
+        metalness: 0.15
+      });
+
+      const stickerGeo = new THREE.PlaneGeometry(0.83, 0.83);
+
+      for (let x = -1; x <= 1; x++) {
+        for (let y = -1; y <= 1; y++) {
+          for (let z = -1; z <= 1; z++) {
+            if (x === 0 && y === 0 && z === 0) continue;
+
+            const group = new THREE.Group();
+            group.position.set(x * spacing, y * spacing, z * spacing);
+            group.userData = { gridPos: [x, y, z], stickerMats: {} };
+
+            const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
+            group.add(bodyMesh);
+
+            // Add 6 sticker planes slightly offset from the cubie faces
+            const faces = ['U', 'D', 'F', 'B', 'L', 'R'];
+            for (const face of faces) {
+              const [nx, ny, nz] = FACE_NORMALS[face];
+              const mat = new THREE.MeshStandardMaterial({
+                color: 0x1a1d26,
+                roughness: 0.22,
+                metalness: 0.05
+              });
+              const plane = new THREE.Mesh(stickerGeo, mat);
+              plane.position.set(nx * 0.485, ny * 0.485, nz * 0.485);
+              plane.lookAt(nx * 2, ny * 2, nz * 2);
+              group.add(plane);
+              group.userData.stickerMats[face] = mat;
+            }
+
+            this.cubeGroup.add(group);
+            this.cubieMeshes.push(group);
+          }
+        }
+      }
+    }
+
+    /**
+     * Synchronize all 26 cubie meshes & sticker colors directly from a CubeState.
+     */
+    syncFromState(cubeState) {
+      this.state = cubeState.clone();
+      const spacing = 1.02;
+
+      // Ensure no cubies remain attached to pivotGroup
+      while (this.pivotGroup.children.length > 0) {
+        const child = this.pivotGroup.children[0];
+        this.cubeGroup.add(child);
+      }
+      this.pivotGroup.rotation.set(0, 0, 0);
+
+      for (const meshGroup of this.cubieMeshes) {
+        const [gx, gy, gz] = meshGroup.userData.gridPos;
+        meshGroup.position.set(gx * spacing, gy * spacing, gz * spacing);
+        meshGroup.rotation.set(0, 0, 0);
+
+        const cubie = this.state.getCubieAt(gx, gy, gz);
+        for (const [face, mat] of Object.entries(meshGroup.userData.stickerMats)) {
+          const colorCode = cubie ? cubie.stickers[face] : null;
+          if (colorCode && COLORS[colorCode]) {
+            mat.color.set(COLORS[colorCode].hex);
+          } else {
+            mat.color.set(0x161922);
+          }
+        }
+      }
+    }
+
+    /**
+     * Smoothly orbit the camera to face `frontFace` ('F', 'R', 'B', 'L', or 'D')
+     * using spherical coordinates so camera distance stays constant and never passes through the pole.
+     */
+    orbitToFace(frontFace, durationMs = 380) {
+      const preset = CAMERA_PRESETS[frontFace] || CAMERA_PRESETS.F;
+      if (frontFace !== 'D') {
+        this.currentFrontFace = frontFace;
+        if (this.onCameraFaceChange) {
+          this.onCameraFaceChange(frontFace);
+        }
+      }
+
+      const startPos = this.camera.position.clone();
+      const endPos = new THREE.Vector3(...preset.pos);
+      if (startPos.distanceTo(endPos) < 0.05) {
+        return Promise.resolve();
+      }
+
+      const startSpherical = new THREE.Spherical().setFromVector3(startPos);
+      const endSpherical = new THREE.Spherical().setFromVector3(endPos);
+
+      // Shortest angular path for theta
+      let deltaTheta = endSpherical.theta - startSpherical.theta;
+      while (deltaTheta > Math.PI) deltaTheta -= Math.PI * 2;
+      while (deltaTheta < -Math.PI) deltaTheta += Math.PI * 2;
+
+      return new Promise(resolve => {
+        const startTime = performance.now();
+        const step = (now) => {
+          const t = Math.min(1, (now - startTime) / durationMs);
+          const ease = 1 - Math.pow(1 - t, 3);
+          this.spherical.radius = startSpherical.radius + (endSpherical.radius - startSpherical.radius) * ease;
+          this.spherical.phi = startSpherical.phi + (endSpherical.phi - startSpherical.phi) * ease;
+          this.spherical.theta = startSpherical.theta + deltaTheta * ease;
+          this.camera.position.setFromSpherical(this.spherical);
+          this.camera.lookAt(0, 0, 0);
+          if (t < 1) {
+            requestAnimationFrame(step);
+          } else {
+            resolve();
+          }
+        };
+        requestAnimationFrame(step);
+      });
+    }
+
+    /**
+     * Animate a single move in absolute cube coordinates (e.g., "R", "U'", "F2")
+     * and update `this.state`.
+     */
+    animateMove(absMove, baseDurationMs = 320) {
+      if (!absMove) return Promise.resolve();
+      const token = absMove.trim();
+      const face = token[0].toUpperCase();
+      const mod = token.slice(1);
+
+      const [nx, ny, nz] = FACE_NORMALS[face];
+      let angle = -Math.PI / 2; // Clockwise around outward normal
+      if (mod === "'" || mod === '’') {
+        angle = Math.PI / 2;
+      } else if (mod === '2' || mod === "2'") {
+        angle = -Math.PI;
+      }
+
+      const duration = Math.max(90, (baseDurationMs * (Math.abs(angle) > 2 ? 1.25 : 1.0)) / this.animationSpeed);
+
+      // Attach matching cubies to pivotGroup
+      this.pivotGroup.rotation.set(0, 0, 0);
+      const activeMeshes = this.cubieMeshes.filter(m =>
+        CubeState.isCubieInFace(m.userData.gridPos, face)
+      );
+      for (const m of activeMeshes) {
+        this.pivotGroup.add(m);
+      }
+
+      this.isAnimating = true;
+      return new Promise(resolve => {
+        const startTime = performance.now();
+        const tick = (now) => {
+          const t = Math.min(1, (now - startTime) / duration);
+          // Smooth cubic easeInOut
+          const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+          const currentAngle = angle * ease;
+          this.pivotGroup.rotation.set(nx * currentAngle, ny * currentAngle, nz * currentAngle);
+
+          if (t < 1) {
+            requestAnimationFrame(tick);
+          } else {
+            this.state.applyMove(token);
+            this.syncFromState(this.state);
+            this.isAnimating = false;
+            resolve();
+          }
+        };
+        requestAnimationFrame(tick);
+      });
+    }
+
+    setSpeed(multiplier) {
+      this.animationSpeed = Math.max(0.25, Math.min(4.0, Number(multiplier) || 1.0));
+    }
+
+    startRenderLoop() {
+      const render = () => {
+        this.renderer.render(this.scene, this.camera);
+        this._rafId = requestAnimationFrame(render);
+      };
+      this._rafId = requestAnimationFrame(render);
+    }
+
+    bindResize() {
+      const onResize = () => {
+        if (!this.container) return;
+        const w = this.container.clientWidth || 520;
+        const h = this.container.clientHeight || 460;
+        const aspect = w / h;
+        this.camera.aspect = aspect;
+        this.camera.fov = this.getAdaptiveFov(aspect);
+        this.camera.updateProjectionMatrix();
+        this.renderer.setSize(w, h);
+      };
+      window.addEventListener('resize', onResize);
+      if (typeof ResizeObserver !== 'undefined') {
+        const ro = new ResizeObserver(onResize);
+        ro.observe(this.container);
+      }
+    }
+  }
+
+  return {
+    CAMERA_PRESETS,
+    Cube3DView
+  };
+});
