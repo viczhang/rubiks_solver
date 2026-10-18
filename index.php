@@ -179,10 +179,10 @@
                 <div class="transport-meta-right">
                   <span id="timeline-progress-text" class="caption-progress-text">Solved</span>
                   <select id="select-speed" class="speed-select" aria-label="Playback Speed">
-                    <option value="0.6">0.6×</option>
-                    <option value="1.0" selected>1.0×</option>
-                    <option value="1.8">1.8×</option>
-                    <option value="3.0">3.0×</option>
+                    <option value="0.5">0.5×</option>
+                    <option value="1" selected>1×</option>
+                    <option value="2">2×</option>
+                    <option value="4">4×</option>
                   </select>
                 </div>
               </div>

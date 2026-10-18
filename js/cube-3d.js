@@ -22,6 +22,9 @@
     D: { pos: [4.1, -5.4, 5.3], label: 'Bottom Peek (White Cross)' }
   };
 
+  // 1x in the UI corresponds to the former 0.6x physical pace
+  const BASE_SPEED_SCALE = 0.6;
+
   class Cube3DView {
     constructor(containerEl, initialCubeState, options = {}) {
       this.container = containerEl;
@@ -30,7 +33,8 @@
       this.currentFrontFace = 'F';
       this.topColor = options.initialTopColor || 'W'; // 'W' for Steps 1–4, 'Y' for Steps 5–8
       this.isAnimating = false;
-      this.animationSpeed = 1.0; // Multiplier (0.5x to 3x)
+      this.userSpeed = 1.0; // UI multiplier (0.5, 1, 2, 4)
+      this.animationSpeed = this.userSpeed * BASE_SPEED_SCALE;
 
       this.initScene();
       this.buildCubies();
@@ -349,7 +353,7 @@
      * as if holding it and giving it another look before proceeding to the next step.
      */
     inspectCubeGesture(baseDurationMs = 1550, shouldAbort = null) {
-      const duration = Math.max(480, baseDurationMs / Math.max(0.6, Math.min(2.2, this.animationSpeed)));
+      const duration = Math.max(400, baseDurationMs / Math.max(0.25, Math.min(3.0, this.animationSpeed)));
       const baseSpherical = new THREE.Spherical().setFromVector3(this.camera.position);
 
       const waypoints = [
@@ -463,7 +467,8 @@
     }
 
     setSpeed(multiplier) {
-      this.animationSpeed = Math.max(0.25, Math.min(4.0, Number(multiplier) || 1.0));
+      this.userSpeed = Math.max(0.25, Math.min(8.0, Number(multiplier) || 1.0));
+      this.animationSpeed = this.userSpeed * BASE_SPEED_SCALE;
     }
 
     startRenderLoop() {
