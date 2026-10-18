@@ -195,6 +195,94 @@
       }
     }
 
+    /**
+     * Softly rounded square alpha map for cubie stickers so sticker corners are round
+     * with feathered anti-aliased edges rather than sharp 90-degree corners.
+     */
+    createRoundedStickerAlphaTexture() {
+      if (typeof document === 'undefined') return null;
+      const size = 128;
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      const img = ctx.createImageData(size, size);
+      const data = img.data;
+
+      // Rounded box SDF in normalized [-1, 1] coordinates
+      const halfSpan = 0.66;
+      const cornerRadius = 0.26;
+      const feather = 0.075;
+
+      for (let y = 0; y < size; y++) {
+        const ny = (y + 0.5) / (size / 2) - 1;
+        for (let x = 0; x < size; x++) {
+          const nx = (x + 0.5) / (size / 2) - 1;
+          const qx = Math.max(0, Math.abs(nx) - halfSpan);
+          const qy = Math.max(0, Math.abs(ny) - halfSpan);
+          const dist = Math.hypot(qx, qy) - cornerRadius;
+
+          // Smoothstep feather across the rounded boundary
+          const t = Math.max(0, Math.min(1, 1 - (dist + feather * 0.5) / feather));
+          const alpha = Math.round(255 * t * t * (3 - 2 * t));
+          const idx = (y * size + x) * 4;
+          data[idx] = 255;
+          data[idx + 1] = 255;
+          data[idx + 2] = 255;
+          data[idx + 3] = alpha;
+        }
+      }
+
+      ctx.putImageData(img, 0, 0);
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.needsUpdate = true;
+      return tex;
+    }
+
+    /**
+     * Soft, fuzzy rounded-squircle cushion texture for the inner sticker halo (zero hard lines).
+     */
+    createSoftHaloTexture() {
+      if (typeof document === 'undefined') return null;
+      const size = 128;
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      const img = ctx.createImageData(size, size);
+      const data = img.data;
+
+      for (let y = 0; y < size; y++) {
+        const ny = (y + 0.5) / (size / 2) - 1;
+        for (let x = 0; x < size; x++) {
+          const nx = (x + 0.5) / (size / 2) - 1;
+          // Blend superellipse (squircle) and circle so corners are ultra-round and pillowy
+          const dSquircle = Math.pow(Math.pow(Math.abs(nx), 2.5) + Math.pow(Math.abs(ny), 2.5), 1 / 2.5);
+          const dCircle = Math.hypot(nx, ny);
+          const d = 0.5 * dSquircle + 0.5 * dCircle;
+
+          const t = Math.max(0, 1 - d / 0.94);
+          // Feathery Gaussian-like falloff
+          const smooth = Math.pow(t, 2.3) * (3 - 2 * t);
+          const alpha = Math.round(255 * Math.min(1, smooth));
+          const idx = (y * size + x) * 4;
+          data[idx] = 255;
+          data[idx + 1] = 255;
+          data[idx + 2] = 255;
+          data[idx + 3] = alpha;
+        }
+      }
+
+      ctx.putImageData(img, 0, 0);
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.needsUpdate = true;
+      return tex;
+    }
+
+    /**
+     * Pure radial Gaussian cloud texture for the camera-facing bloom aura sprite.
+     * Completely round, fuzzy, and feathery all the way to the edge.
+     */
     createGlowAuraTexture() {
       if (typeof document === 'undefined') return null;
       const size = 128;
@@ -202,21 +290,26 @@
       canvas.width = size;
       canvas.height = size;
       const ctx = canvas.getContext('2d');
+      const img = ctx.createImageData(size, size);
+      const data = img.data;
 
-      // Outer soft radial bloom
-      const grad = ctx.createRadialGradient(size / 2, size / 2, size * 0.12, size / 2, size / 2, size * 0.5);
-      grad.addColorStop(0.0, 'rgba(255, 255, 255, 1.0)');
-      grad.addColorStop(0.42, 'rgba(255, 255, 255, 0.82)');
-      grad.addColorStop(0.72, 'rgba(255, 255, 255, 0.32)');
-      grad.addColorStop(1.0, 'rgba(255, 255, 255, 0.0)');
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, size, size);
+      for (let y = 0; y < size; y++) {
+        const ny = (y + 0.5) / (size / 2) - 1;
+        for (let x = 0; x < size; x++) {
+          const nx = (x + 0.5) / (size / 2) - 1;
+          const r = Math.hypot(nx, ny);
+          const windowFade = Math.pow(Math.max(0, 1 - r / 0.96), 2.0);
+          const gaussian = Math.exp(-3.4 * r * r);
+          const alpha = Math.round(255 * Math.min(1, gaussian * windowFade));
+          const idx = (y * size + x) * 4;
+          data[idx] = 255;
+          data[idx + 1] = 255;
+          data[idx + 2] = 255;
+          data[idx + 3] = alpha;
+        }
+      }
 
-      // Crisp bright square rim inside the bloom so sticker edges look electrified
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
-      ctx.lineWidth = 10;
-      ctx.strokeRect(22, 22, size - 44, size - 44);
-
+      ctx.putImageData(img, 0, 0);
       const tex = new THREE.CanvasTexture(canvas);
       tex.needsUpdate = true;
       return tex;
@@ -232,9 +325,10 @@
         metalness: 0.15
       });
 
-      const stickerGeo = new THREE.PlaneGeometry(0.83, 0.83);
-      const haloGeo = new THREE.PlaneGeometry(0.98, 0.98);
-      const auraGeo = new THREE.PlaneGeometry(1.58, 1.58);
+      const stickerGeo = new THREE.PlaneGeometry(0.85, 0.85);
+      const haloGeo = new THREE.PlaneGeometry(1.42, 1.42);
+      const stickerAlphaTex = this.createRoundedStickerAlphaTexture();
+      const haloTex = this.createSoftHaloTexture();
       const auraTex = this.createGlowAuraTexture();
 
       for (let x = -1; x <= 1; x++) {
@@ -257,28 +351,33 @@
             const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
             group.add(bodyMesh);
 
-            // Add 6 sticker planes slightly offset from the cubie faces + glowing halo frames + additive bloom auras
+            // Add 6 rounded sticker planes + soft fuzzy squircle halos + camera-facing radial cloud sprites
             const faces = ['U', 'D', 'F', 'B', 'L', 'R'];
             for (const face of faces) {
               const [nx, ny, nz] = FACE_NORMALS[face];
 
               const haloMat = new THREE.MeshBasicMaterial({
                 color: 0x00f5ff,
+                map: haloTex,
                 transparent: true,
                 opacity: 0,
                 blending: THREE.AdditiveBlending,
-                depthWrite: false
+                depthWrite: false,
+                depthTest: false
               });
               const haloPlane = new THREE.Mesh(haloGeo, haloMat);
               haloPlane.position.set(nx * 0.483, ny * 0.483, nz * 0.483);
               haloPlane.lookAt(nx * 2, ny * 2, nz * 2);
-              haloPlane.renderOrder = 3;
+              haloPlane.renderOrder = 5;
               group.add(haloPlane);
 
               const mat = new THREE.MeshStandardMaterial({
                 color: 0x1a1d26,
                 roughness: 0.22,
-                metalness: 0.05
+                metalness: 0.05,
+                alphaMap: stickerAlphaTex,
+                transparent: true,
+                alphaTest: 0.02
               });
               const plane = new THREE.Mesh(stickerGeo, mat);
               plane.position.set(nx * 0.486, ny * 0.486, nz * 0.486);
@@ -286,27 +385,28 @@
               plane.renderOrder = 4;
               group.add(plane);
 
-              const auraMat = new THREE.MeshBasicMaterial({
+              // Camera-facing Sprite for the outer bloom cloud so it never forms sharp 3D plane edges or Z-buffer cuts
+              const auraMat = new THREE.SpriteMaterial({
                 color: 0x00f5ff,
                 map: auraTex,
                 transparent: true,
                 opacity: 0,
                 blending: THREE.AdditiveBlending,
                 depthWrite: false,
-                side: THREE.DoubleSide
+                depthTest: false
               });
-              const auraPlane = new THREE.Mesh(auraGeo, auraMat);
-              auraPlane.position.set(nx * 0.505, ny * 0.505, nz * 0.505);
-              auraPlane.lookAt(nx * 2, ny * 2, nz * 2);
-              auraPlane.renderOrder = 6;
-              group.add(auraPlane);
+              const auraSprite = new THREE.Sprite(auraMat);
+              auraSprite.position.set(nx * 0.50, ny * 0.50, nz * 0.50);
+              auraSprite.scale.set(1.65, 1.65, 1);
+              auraSprite.renderOrder = 8;
+              group.add(auraSprite);
 
               group.userData.stickerMats[face] = mat;
               group.userData.stickerMeshes[face] = plane;
               group.userData.haloMats[face] = haloMat;
               group.userData.haloMeshes[face] = haloPlane;
               group.userData.auraMats[face] = auraMat;
-              group.userData.auraMeshes[face] = auraPlane;
+              group.userData.auraMeshes[face] = auraSprite;
             }
 
             this.cubeGroup.add(group);
@@ -371,8 +471,8 @@
 
           const aMesh = meshGroup.userData.auraMeshes[face];
           if (aMesh) {
-            aMesh.scale.set(1, 1, 1);
-            aMesh.position.set(nx * 0.505, ny * 0.505, nz * 0.505);
+            aMesh.scale.set(1.65, 1.65, 1);
+            aMesh.position.set(nx * 0.50, ny * 0.50, nz * 0.50);
           }
         }
       }
@@ -626,10 +726,15 @@
             this.ringMat.opacity = 0.14 + 0.82 * glowStrength;
           }
 
+          const camDir = this.camera.position.clone().normalize();
+          const rotZ = this.orientationGroup ? this.orientationGroup.rotation.z : 0;
+          const cosZ = Math.cos(rotZ);
+          const sinZ = Math.sin(rotZ);
+
           for (const item of cubieTargets) {
-            // Goal cubies pop outward up to 20%; non-goal cubies slightly retract
+            // Goal cubies pop outward up to 18%; non-goal cubies slightly retract
             const popFactor = item.hasGoalSticker
-              ? (1 + 0.20 * glowStrength)
+              ? (1 + 0.18 * glowStrength)
               : (1 - 0.04 * envelope);
             item.meshGroup.position.set(
               item.gx * spacing * popFactor,
@@ -640,13 +745,22 @@
             for (const f of item.faceEntries) {
               if (!f.isExternal) continue;
               if (f.isGoal) {
-                // Strobe sticker color toward neon cyan/white at pulse peaks + intense emissive bloom
-                f.mat.color.copy(f.baseColor).lerp(f.strobeColor, 0.58 * pulse * envelope);
-                f.mat.emissive.setHex(f.haloHex);
-                f.mat.emissiveIntensity = 1.6 * glowStrength;
+                // World-space normal of this sticker face (accounting for orientationGroup Z flip)
+                const wnx = f.nx * cosZ - f.ny * sinZ;
+                const wny = f.nx * sinZ + f.ny * cosZ;
+                const wnz = f.nz;
+                const facingDot = wnx * camDir.x + wny * camDir.y + wnz * camDir.z;
+                // Smoothly fade out halos/sprites on back-facing sides so depthTest:false never bleeds through the back
+                const facingVis = Math.max(0, Math.min(1, (facingDot + 0.08) / 0.42));
 
-                const lift = 0.075 * glowStrength;
-                const sScale = 1 + 0.16 * glowStrength;
+                // Strobe sticker color toward neon cyan/white at pulse peaks + intense emissive bloom
+                f.mat.color.copy(f.baseColor).lerp(f.strobeColor, 0.55 * pulse * envelope);
+                f.mat.emissive.setHex(f.haloHex);
+                f.mat.emissiveIntensity = 1.5 * glowStrength;
+
+                const lift = 0.065 * glowStrength;
+                // Keep solid sticker scale gentle so the soft fuzzy halo & radial cloud form the outer edge
+                const sScale = 1 + 0.04 * glowStrength;
                 if (f.sMesh) {
                   f.sMesh.scale.set(sScale, sScale, 1);
                   f.sMesh.position.set(f.nx * (0.486 + lift), f.ny * (0.486 + lift), f.nz * (0.486 + lift));
@@ -654,9 +768,9 @@
 
                 if (f.hMat) {
                   f.hMat.color.setHex(f.haloHex);
-                  f.hMat.opacity = Math.min(1, 1.15 * glowStrength);
+                  f.hMat.opacity = Math.min(1, 0.95 * glowStrength * facingVis);
                 }
-                const hScale = 1 + 0.26 * glowStrength;
+                const hScale = 1.05 + 0.32 * glowStrength;
                 if (f.hMesh) {
                   f.hMesh.scale.set(hScale, hScale, 1);
                   f.hMesh.position.set(f.nx * (0.483 + lift), f.ny * (0.483 + lift), f.nz * (0.483 + lift));
@@ -664,12 +778,12 @@
 
                 if (f.aMat) {
                   f.aMat.color.setHex(f.haloHex);
-                  f.aMat.opacity = Math.min(1, 1.10 * glowStrength);
+                  f.aMat.opacity = Math.min(1, 0.92 * glowStrength * facingVis);
                 }
-                const aScale = 1 + 0.38 * pulse * envelope;
+                const aScale = 1.75 + 0.70 * pulse * envelope;
                 if (f.aMesh) {
                   f.aMesh.scale.set(aScale, aScale, 1);
-                  f.aMesh.position.set(f.nx * (0.505 + lift), f.ny * (0.505 + lift), f.nz * (0.505 + lift));
+                  f.aMesh.position.set(f.nx * (0.50 + lift), f.ny * (0.50 + lift), f.nz * (0.50 + lift));
                 }
               } else {
                 // Spotlight blackout: dim non-goal stickers down to 12% brightness so goal pieces dominate
