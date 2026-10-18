@@ -14,7 +14,7 @@
     cube: new CubeState(),
     view3d: null,
     activeFrontFace: 'F',
-    activeTopColor: 'W', // 'W' for Steps 1–4, 'Y' for Steps 5–8
+    activeTopColor: 'Y', // 'Y' for Step 1 (The Daisy) & Steps 5–8; 'W' for Steps 2–4
 
     // Solver timeline state
     solution: null,
@@ -38,7 +38,10 @@
   };
 
   function getTopColorForStage(stageNumber) {
-    return stageNumber <= 4 ? 'W' : 'Y';
+    // Step 1 (The Daisy) builds white petals around the Yellow center on UP ('Y').
+    // Steps 2–4 (White Cross, White Corners, Middle Layer) display White on UP ('W').
+    // Steps 5–8 (Yellow Cross, Yellow Face, Yellow Corners, Yellow Edges) display Yellow on UP ('Y').
+    return (stageNumber >= 2 && stageNumber <= 4) ? 'W' : 'Y';
   }
 
   document.addEventListener('DOMContentLoaded', initApp);
@@ -67,7 +70,7 @@
 
     const viewportEl = document.getElementById('cube-3d-viewport');
     appState.view3d = new Cube3DView(viewportEl, appState.cube, {
-      initialTopColor: 'W',
+      initialTopColor: 'Y',
       onCameraFaceChange: (detectedFace, topColor) => {
         appState.activeFrontFace = detectedFace;
         if (topColor) appState.activeTopColor = topColor;
@@ -306,7 +309,7 @@
       appState.solution = solver.solve();
       appState.currentMoveCursor = -1;
       const firstMove = appState.solution.flatMoves[0];
-      const initialTop = firstMove ? getTopColorForStage(firstMove.stageNumber) : 'W';
+      const initialTop = firstMove ? getTopColorForStage(firstMove.stageNumber) : 'Y';
       const initialFront = firstMove ? firstMove.frontFace : 'F';
       if (appState.view3d) {
         appState.view3d.orientCube(initialFront, initialTop, 300);
@@ -379,7 +382,7 @@
       appState.cube = appState.solution.initialState.clone();
       appState.view3d.syncFromState(appState.cube);
       const firstMove = moves[0];
-      const targetTop = firstMove ? getTopColorForStage(firstMove.stageNumber) : 'W';
+      const targetTop = firstMove ? getTopColorForStage(firstMove.stageNumber) : 'Y';
       const targetFront = firstMove ? firstMove.frontFace : 'F';
       appState.view3d.orientCube(targetFront, targetTop, 280);
       renderMiniNet(appState.cube);
