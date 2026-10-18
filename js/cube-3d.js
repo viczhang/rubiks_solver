@@ -344,6 +344,73 @@
     }
 
     /**
+     * Natural "human inspection" gesture after a step finishes:
+     * Rotates the cube view back and forth (left/right) and up and down (top/bottom)
+     * as if holding it and giving it another look before proceeding to the next step.
+     */
+    inspectCubeGesture(baseDurationMs = 1550, shouldAbort = null) {
+      const duration = Math.max(480, baseDurationMs / Math.max(0.6, Math.min(2.2, this.animationSpeed)));
+      const baseSpherical = new THREE.Spherical().setFromVector3(this.camera.position);
+
+      const waypoints = [
+        { t: 0.0,  dTheta: 0.0,   dPhi: 0.0 },
+        { t: 0.27, dTheta: 0.56,  dPhi: -0.24 },
+        { t: 0.58, dTheta: -0.56, dPhi: 0.30 },
+        { t: 0.82, dTheta: 0.20,  dPhi: -0.18 },
+        { t: 1.0,  dTheta: 0.0,   dPhi: 0.0 }
+      ];
+
+      return new Promise(resolve => {
+        const startTime = performance.now();
+        const tick = (now) => {
+          if (shouldAbort && shouldAbort()) {
+            this.spherical.copy(baseSpherical);
+            this.camera.position.setFromSpherical(this.spherical);
+            this.camera.lookAt(0, 0, 0);
+            resolve();
+            return;
+          }
+
+          const progress = Math.min(1, (now - startTime) / duration);
+
+          // Find current segment in waypoints
+          let segIdx = 0;
+          for (let i = 0; i < waypoints.length - 1; i++) {
+            if (progress >= waypoints[i].t && progress <= waypoints[i + 1].t) {
+              segIdx = i;
+              break;
+            }
+          }
+          const wp0 = waypoints[segIdx];
+          const wp1 = waypoints[segIdx + 1];
+          const segSpan = Math.max(0.0001, wp1.t - wp0.t);
+          const localT = Math.min(1, Math.max(0, (progress - wp0.t) / segSpan));
+          // Smooth cosine ease-in-out between waypoints
+          const ease = 0.5 - 0.5 * Math.cos(Math.PI * localT);
+
+          const dTheta = wp0.dTheta + (wp1.dTheta - wp0.dTheta) * ease;
+          const dPhi = wp0.dPhi + (wp1.dPhi - wp0.dPhi) * ease;
+
+          this.spherical.radius = baseSpherical.radius;
+          this.spherical.theta = baseSpherical.theta + dTheta;
+          this.spherical.phi = Math.max(0.22, Math.min(Math.PI - 0.22, baseSpherical.phi + dPhi));
+          this.camera.position.setFromSpherical(this.spherical);
+          this.camera.lookAt(0, 0, 0);
+
+          if (progress < 1) {
+            requestAnimationFrame(tick);
+          } else {
+            this.spherical.copy(baseSpherical);
+            this.camera.position.setFromSpherical(this.spherical);
+            this.camera.lookAt(0, 0, 0);
+            resolve();
+          }
+        };
+        requestAnimationFrame(tick);
+      });
+    }
+
+    /**
      * Animate a single move in absolute cube coordinates (e.g., "R", "U'", "F2")
      * and update `this.state`.
      */

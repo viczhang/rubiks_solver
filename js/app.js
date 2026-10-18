@@ -441,12 +441,22 @@
     return true;
   }
 
+  async function interruptibleWait(ms, token) {
+    const end = performance.now() + Math.max(0, ms);
+    while (performance.now() < end) {
+      if (!appState.isPlaying || appState.playToken !== token) return false;
+      await new Promise(r => setTimeout(r, Math.min(45, end - performance.now())));
+    }
+    return appState.isPlaying && appState.playToken === token;
+  }
+
   async function startPlayback() {
     if (!appState.solution || appState.solution.flatMoves.length === 0) return;
     if (appState.currentMoveCursor >= appState.solution.flatMoves.length - 1) {
       jumpToMoveIndex(-1);
     }
     appState.isPlaying = true;
+    appState.inspectingStageNumber = null;
     const myToken = ++appState.playToken;
     updateTimelineUI();
 
@@ -454,15 +464,51 @@
       const advanced = await stepForwardOneMove();
       if (!advanced) {
         appState.isPlaying = false;
+        appState.inspectingStageNumber = null;
         updateTimelineUI();
         break;
       }
-      await new Promise(r => setTimeout(r, 90));
+      if (!appState.isPlaying || appState.playToken !== myToken) break;
+
+      const moves = appState.solution.flatMoves;
+      const curIdx = appState.currentMoveCursor;
+      const justCompleted = moves[curIdx];
+      const nextMove = curIdx + 1 < moves.length ? moves[curIdx + 1] : null;
+      const speed = appState.view3d ? appState.view3d.animationSpeed : 1.0;
+
+      if (!nextMove || nextMove.stageNumber !== justCompleted.stageNumber) {
+        // Completed a Step (1..8): pause, rotate the cube back & forth and up & down to inspect it before proceeding
+        appState.inspectingStageNumber = justCompleted.stageNumber;
+        updateTimelineUI();
+
+        if (!(await interruptibleWait(Math.round(320 / speed), myToken))) break;
+        await appState.view3d.inspectCubeGesture(
+          1550,
+          () => !appState.isPlaying || appState.playToken !== myToken
+        );
+        if (!(await interruptibleWait(Math.round(280 / speed), myToken))) break;
+
+        appState.inspectingStageNumber = null;
+        updateTimelineUI();
+
+        if (!nextMove) {
+          appState.isPlaying = false;
+          updateTimelineUI();
+          break;
+        }
+      } else if (nextMove.subStepIndex !== justCompleted.subStepIndex) {
+        // Completed an algorithm combo (sub-step) within the same Step: pause briefly before the next combo
+        if (!(await interruptibleWait(Math.round(520 / speed), myToken))) break;
+      } else {
+        // Brief beat between individual turns of the same algorithm combo
+        if (!(await interruptibleWait(Math.round(95 / speed), myToken))) break;
+      }
     }
   }
 
   function stopPlayback() {
     appState.isPlaying = false;
+    appState.inspectingStageNumber = null;
     appState.playToken++;
     updateTimelineUI();
   }
@@ -528,10 +574,13 @@
     });
 
     if (activeBanner && activeMove) {
+      const isInspecting = Boolean(appState.inspectingStageNumber);
       const nextMoveIdx = appState.currentMoveCursor + 1;
-      const focusMove = nextMoveIdx < total ? sol.flatMoves[nextMoveIdx] : activeMove;
+      const focusMove = isInspecting
+        ? activeMove
+        : (nextMoveIdx < total ? sol.flatMoves[nextMoveIdx] : activeMove);
       const focusSubStep = sol.subSteps[focusMove.subStepIndex];
-      const isDone = appState.currentMoveCursor >= total - 1;
+      const isDone = !isInspecting && appState.currentMoveCursor >= total - 1;
       const colorCss = COLORS[focusMove.frontColor].css;
       const stageTopColor = getTopColorForStage(focusMove.stageNumber);
       const topCss = stageTopColor === 'W' ? 'white' : 'yellow';
@@ -544,10 +593,13 @@
           const mToken = focusSubStep.relativeMoves[i];
           let cls = 'caption-move-pill';
           if (gIdx <= appState.currentMoveCursor) cls += ' completed';
-          else if (gIdx === nextMoveIdx) cls += ' next-up';
+          else if (!isInspecting && gIdx === nextMoveIdx) cls += ' next-up';
           subStepPillsHtml += `<button type="button" class="${cls}" data-caption-move-idx="${gIdx}" title="Jump to move #${gIdx + 1}">${escapeHtml(mToken)}</button>`;
         }
       }
+
+      const stageMeta = STAGE_METADATA.find(s => s.number === focusMove.stageNumber);
+      const stageShortName = stageMeta ? stageMeta.shortTitle : `Step ${focusMove.stageNumber}`;
 
       activeBanner.innerHTML = isDone
         ? `<div class="banner-solved">
@@ -556,13 +608,15 @@
            </div>`
         : `<div class="banner-step-active">
              <div class="banner-top-row">
-               <span class="stage-tag">Step ${focusMove.stageNumber} of 8</span>
+               <span class="stage-tag">${isInspecting ? `✓ Step ${focusMove.stageNumber} Done` : `Step ${focusMove.stageNumber} of 8`}</span>
                <span class="front-indicator"><span class="color-dot dot-${topCss}"></span> <strong>${topName}</strong> Top</span>
                <span class="front-indicator"><span class="color-dot dot-${colorCss}"></span> <strong>${focusMove.frontColorName}</strong> Front</span>
                <div class="caption-pills-strip">${subStepPillsHtml}</div>
              </div>
              <div class="caption-subtitle-text">
-               <strong>${escapeHtml(focusMove.subStepTitle)}:</strong> ${escapeHtml(focusMove.explanation)}
+               ${isInspecting
+                 ? `<strong>Step ${focusMove.stageNumber} (${escapeHtml(stageShortName)}) Complete!</strong> Pausing to inspect the cube before proceeding...`
+                 : `<strong>${escapeHtml(focusMove.subStepTitle)}:</strong> ${escapeHtml(focusMove.explanation)}`}
              </div>
            </div>`;
 
