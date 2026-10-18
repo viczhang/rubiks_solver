@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 38 38" width="64" height="64">
+  <rect x="0.5" y="0.5" width="37" height="37" rx="6" fill="#050608" stroke="#30374f" stroke-width="1"/>
+  <!-- Row 1: Yellow, Red, Blue -->
+  <rect x="5"  y="5"  width="8" height="8" rx="1.5" fill="#fce000"/>
+  <rect x="15" y="5"  width="8" height="8" rx="1.5" fill="#e31b23"/>
+  <rect x="25" y="5"  width="8" height="8" rx="1.5" fill="#0051ba"/>
+  <!-- Row 2: Green, Yellow, Orange -->
+  <rect x="5"  y="15" width="8" height="8" rx="1.5" fill="#009e60"/>
+  <rect x="15" y="15" width="8" height="8" rx="1.5" fill="#fce000"/>
+  <rect x="25" y="15" width="8" height="8" rx="1.5" fill="#ff6b00"/>
+  <!-- Row 3: White, Blue, Red -->
+  <rect x="5"  y="25" width="8" height="8" rx="1.5" fill="#ffffff"/>
+  <rect x="15" y="25" width="8" height="8" rx="1.5" fill="#0051ba"/>
+  <rect x="25" y="25" width="8" height="8" rx="1.5" fill="#e31b23"/>
+</svg>
