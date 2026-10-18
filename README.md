@@ -20,7 +20,7 @@ An interactive 3D Rubik's Cube solver and tutorial companion web application imp
 
 ## Project Structure
 
-- `index.php` — Application shell, 3D stage HUD, solver/guide/practice panes, and 2D painter modal
+- `index.html` — Application shell, 3D stage HUD, solver/guide/practice panes, and 2D painter modal
 - `css/styles.css` — Responsive dark-mode styling for desktop split-screen and mobile movie-caption layouts
 - `js/cube-state.js` — 54-sticker state model, move engine, perspective remapper, and solvability validator
 - `js/solver-guide.js` — Deterministic 8-Step Solve Guide human-style solver
