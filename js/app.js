@@ -486,7 +486,8 @@
 
         if (!(await interruptibleWait(Math.round(320 / speed), myToken))) break;
         await appState.view3d.inspectCubeGesture(
-          1550,
+          justCompleted.stageNumber,
+          1750,
           () => !appState.isPlaying || appState.playToken !== myToken
         );
         if (!(await interruptibleWait(Math.round(280 / speed), myToken))) break;
@@ -534,6 +535,7 @@
       if (progressText) progressText.textContent = '0 / 0';
       if (progressBar) progressBar.style.width = '100%';
       if (activeBanner) {
+        activeBanner.classList.remove('banner-inspecting-glow');
         activeBanner.innerHTML = `
           <div class="banner-solved">
             <span class="solved-badge">SOLVED</span>
@@ -578,6 +580,7 @@
 
     if (activeBanner && activeMove) {
       const isInspecting = Boolean(appState.inspectingStageNumber);
+      activeBanner.classList.toggle('banner-inspecting-glow', isInspecting);
       const nextMoveIdx = appState.currentMoveCursor + 1;
       const focusMove = isInspecting
         ? activeMove
@@ -603,6 +606,17 @@
 
       const stageMeta = STAGE_METADATA.find(s => s.number === focusMove.stageNumber);
       const stageShortName = stageMeta ? stageMeta.shortTitle : `Step ${focusMove.stageNumber}`;
+      const GOAL_GLOW_NOTES = {
+        1: '✨ Glowing Goal: 4 White edge petals surrounding the Yellow center (The Daisy)!',
+        2: '✨ Glowing Goal: White Cross formed with all 4 side edges matched to their centers!',
+        3: '✨ Glowing Goal: All 4 White Corners solved cleanly in the first layer!',
+        4: '✨ Glowing Goal: All 4 Middle Layer edge pieces solved in place!',
+        5: '✨ Glowing Goal: Yellow Cross formed on the top face!',
+        6: '✨ Glowing Goal: All 9 stickers on the Yellow Face oriented on top!',
+        7: '✨ Glowing Goal: All 4 Top-Layer Corners positioned with matching side colors!',
+        8: '✨ Glowing Goal: Final Top Edges solved — Complete Rubik’s Cube!'
+      };
+      const glowCaption = GOAL_GLOW_NOTES[focusMove.stageNumber] || 'Inspecting the completed goal on the 3D cube...';
 
       activeBanner.innerHTML = isDone
         ? `<div class="banner-solved">
@@ -611,14 +625,14 @@
            </div>`
         : `<div class="banner-step-active">
              <div class="banner-top-row">
-               <span class="stage-tag">${isInspecting ? `✓ Step ${focusMove.stageNumber} Done` : `Step ${focusMove.stageNumber} of 8`}</span>
+               <span class="stage-tag ${isInspecting ? 'stage-tag-glow' : ''}">${isInspecting ? `✨ Step ${focusMove.stageNumber} Goal Complete` : `Step ${focusMove.stageNumber} of 8`}</span>
                <span class="front-indicator"><span class="color-dot dot-${topCss}"></span> <strong>${topName}</strong> Top</span>
                <span class="front-indicator"><span class="color-dot dot-${colorCss}"></span> <strong>${focusMove.frontColorName}</strong> Front</span>
                <div class="caption-pills-strip">${subStepPillsHtml}</div>
              </div>
              <div class="caption-subtitle-text">
                ${isInspecting
-                 ? `<strong>Step ${focusMove.stageNumber} (${escapeHtml(stageShortName)}) Complete!</strong> Pausing to inspect the cube before proceeding...`
+                 ? `<strong>Step ${focusMove.stageNumber} (${escapeHtml(stageShortName)}) Complete!</strong> ${escapeHtml(glowCaption)}`
                  : `<strong>${escapeHtml(focusMove.subStepTitle)}:</strong> ${escapeHtml(focusMove.explanation)}`}
              </div>
            </div>`;
@@ -966,6 +980,7 @@
           renderMiniNet(appState.cube);
           await new Promise(r => setTimeout(r, 120));
         }
+        await appState.view3d.inspectCubeGesture(step.number, 1650);
       });
     }
 

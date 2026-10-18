@@ -206,6 +206,7 @@
       });
 
       const stickerGeo = new THREE.PlaneGeometry(0.83, 0.83);
+      const haloGeo = new THREE.PlaneGeometry(0.95, 0.95);
 
       for (let x = -1; x <= 1; x++) {
         for (let y = -1; y <= 1; y++) {
@@ -214,25 +215,47 @@
 
             const group = new THREE.Group();
             group.position.set(x * spacing, y * spacing, z * spacing);
-            group.userData = { gridPos: [x, y, z], stickerMats: {} };
+            group.userData = {
+              gridPos: [x, y, z],
+              stickerMats: {},
+              stickerMeshes: {},
+              haloMats: {},
+              haloMeshes: {}
+            };
 
             const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
             group.add(bodyMesh);
 
-            // Add 6 sticker planes slightly offset from the cubie faces
+            // Add 6 sticker planes slightly offset from the cubie faces + glowing halo frames
             const faces = ['U', 'D', 'F', 'B', 'L', 'R'];
             for (const face of faces) {
               const [nx, ny, nz] = FACE_NORMALS[face];
+
+              const haloMat = new THREE.MeshBasicMaterial({
+                color: 0x00f5ff,
+                transparent: true,
+                opacity: 0,
+                depthWrite: false
+              });
+              const haloPlane = new THREE.Mesh(haloGeo, haloMat);
+              haloPlane.position.set(nx * 0.482, ny * 0.482, nz * 0.482);
+              haloPlane.lookAt(nx * 2, ny * 2, nz * 2);
+              group.add(haloPlane);
+
               const mat = new THREE.MeshStandardMaterial({
                 color: 0x1a1d26,
                 roughness: 0.22,
                 metalness: 0.05
               });
               const plane = new THREE.Mesh(stickerGeo, mat);
-              plane.position.set(nx * 0.485, ny * 0.485, nz * 0.485);
+              plane.position.set(nx * 0.486, ny * 0.486, nz * 0.486);
               plane.lookAt(nx * 2, ny * 2, nz * 2);
               group.add(plane);
+
               group.userData.stickerMats[face] = mat;
+              group.userData.stickerMeshes[face] = plane;
+              group.userData.haloMats[face] = haloMat;
+              group.userData.haloMeshes[face] = haloPlane;
             }
 
             this.cubeGroup.add(group);
@@ -256,6 +279,10 @@
       }
       this.pivotGroup.rotation.set(0, 0, 0);
 
+      if (this.ringMat) {
+        this.ringMat.opacity = 0.14;
+      }
+
       for (const meshGroup of this.cubieMeshes) {
         const [gx, gy, gz] = meshGroup.userData.gridPos;
         meshGroup.position.set(gx * spacing, gy * spacing, gz * spacing);
@@ -269,12 +296,72 @@
           } else {
             mat.color.set(0x161922);
           }
+          mat.emissive.setHex(0x000000);
+          mat.emissiveIntensity = 0;
+
+          const sMesh = meshGroup.userData.stickerMeshes[face];
+          if (sMesh) sMesh.scale.set(1, 1, 1);
+
+          const hMat = meshGroup.userData.haloMats[face];
+          if (hMat) hMat.opacity = 0;
+
+          const hMesh = meshGroup.userData.haloMeshes[face];
+          if (hMesh) hMesh.scale.set(1, 1, 1);
         }
       }
     }
 
     /**
-     * Smoothly orient the cube's top center face ('W' for Steps 1–4, 'Y' for Steps 5–8)
+     * Determines whether a sticker on cubie `(gx, gy, gz)` with direction `face`
+     * belongs to the completed goal pattern of `stageNumber` (1..8).
+     */
+    isStepGoalSticker(stageNumber, gx, gy, gz, face) {
+      const absX = Math.abs(gx);
+      const absZ = Math.abs(gz);
+      const isEdgeXZ = (absX + absZ) === 1;
+      const isCornerXZ = absX === 1 && absZ === 1;
+      const isCenterXZ = absX === 0 && absZ === 0;
+
+      switch (stageNumber) {
+        case 1:
+          // Step 1: The Daisy — Yellow center + 4 White edge petals on U (gy = 1)
+          return gy === 1 && face === 'U' && (isCenterXZ || isEdgeXZ);
+
+        case 2:
+          // Step 2: The White Cross — White center + 4 White edges on D (gy = -1) + matching side centers
+          if (gy === -1 && (isCenterXZ || isEdgeXZ)) return true;
+          if (gy === 0 && isEdgeXZ && face !== 'U' && face !== 'D') return true;
+          return false;
+
+        case 3:
+          // Step 3: The White Corners — All 4 White corners in the White layer (gy = -1)
+          return gy === -1 && isCornerXZ;
+
+        case 4:
+          // Step 4: The Middle Layer — All 4 middle layer edges (gy = 0, corners of XZ) + side centers
+          return gy === 0 && (isCornerXZ || isEdgeXZ);
+
+        case 5:
+          // Step 5: The Yellow Cross — Yellow center + 4 Yellow edges on U (gy = 1)
+          return gy === 1 && face === 'U' && (isCenterXZ || isEdgeXZ);
+
+        case 6:
+          // Step 6: The Yellow Face — All 9 stickers on the Yellow UP face (gy = 1, face = 'U')
+          return gy === 1 && face === 'U';
+
+        case 7:
+          // Step 7: The Yellow Corners — All 4 Yellow corners in the top layer (gy = 1)
+          return gy === 1 && isCornerXZ;
+
+        case 8:
+        default:
+          // Step 8: The Yellow Edges & Complete Solved Cube — All external stickers glow!
+          return true;
+      }
+    }
+
+    /**
+     * Smoothly orient the cube's top center face ('W' for Steps 2–4, 'Y' for Step 1 & Steps 5–8)
      * and orbit the camera to face `frontFace` ('F', 'R', 'B', 'L', or 'D').
      */
     orientCube(frontFace = this.currentFrontFace, topColor = this.topColor, durationMs = 380) {
@@ -348,13 +435,14 @@
     }
 
     /**
-     * Natural "human inspection" gesture after a step finishes:
-     * Rotates the cube view back and forth (left/right) and up and down (top/bottom)
-     * as if holding it and giving it another look before proceeding to the next step.
+     * Natural "human inspection" gesture + flashy goal-piece glow celebration after a step finishes:
+     * Rotates the cube view back and forth (left/right) and up and down (top/bottom) while
+     * pulsing a neon halo, emissive glow, and radial pop-out on the completed goal pieces.
      */
-    inspectCubeGesture(baseDurationMs = 1550, shouldAbort = null) {
-      const duration = Math.max(400, baseDurationMs / Math.max(0.25, Math.min(3.0, this.animationSpeed)));
+    inspectCubeGesture(stageNumber = 1, baseDurationMs = 1750, shouldAbort = null) {
+      const duration = Math.max(450, baseDurationMs / Math.max(0.25, Math.min(3.0, this.animationSpeed)));
       const baseSpherical = new THREE.Spherical().setFromVector3(this.camera.position);
+      const spacing = 1.02;
 
       const waypoints = [
         { t: 0.0,  dTheta: 0.0,   dPhi: 0.0 },
@@ -364,20 +452,61 @@
         { t: 1.0,  dTheta: 0.0,   dPhi: 0.0 }
       ];
 
+      // Precompute goal status and base sticker colors for fast per-frame glow updates
+      const cubieTargets = this.cubieMeshes.map(meshGroup => {
+        const [gx, gy, gz] = meshGroup.userData.gridPos;
+        const cubie = this.state.getCubieAt(gx, gy, gz);
+        let hasGoalSticker = false;
+        const faceEntries = [];
+
+        for (const [face, mat] of Object.entries(meshGroup.userData.stickerMats)) {
+          const colorCode = cubie ? cubie.stickers[face] : null;
+          const isExternal = Boolean(colorCode && COLORS[colorCode]);
+          const baseHex = isExternal ? COLORS[colorCode].hex : 0x161922;
+          const baseColor = new THREE.Color(baseHex);
+          const isGoal = isExternal && this.isStepGoalSticker(stageNumber, gx, gy, gz, face);
+          if (isGoal) hasGoalSticker = true;
+
+          // Choose a vivid contrasting halo/emissive tint so both White and Yellow tiles glow unmistakably
+          const haloHex = (colorCode === 'W') ? 0x00f0ff : (colorCode === 'Y' ? 0xffae00 : 0xffffff);
+          const emissiveHex = (colorCode === 'W') ? 0x00d8ff : baseHex;
+
+          faceEntries.push({
+            face,
+            mat,
+            sMesh: meshGroup.userData.stickerMeshes[face],
+            hMat: meshGroup.userData.haloMats[face],
+            hMesh: meshGroup.userData.haloMeshes[face],
+            isExternal,
+            isGoal,
+            baseColor,
+            haloHex,
+            emissiveHex
+          });
+        }
+
+        return { meshGroup, gx, gy, gz, hasGoalSticker, faceEntries };
+      });
+
+      const restoreCleanState = () => {
+        this.spherical.copy(baseSpherical);
+        this.camera.position.setFromSpherical(this.spherical);
+        this.camera.lookAt(0, 0, 0);
+        this.syncFromState(this.state);
+      };
+
       return new Promise(resolve => {
         const startTime = performance.now();
         const tick = (now) => {
           if (shouldAbort && shouldAbort()) {
-            this.spherical.copy(baseSpherical);
-            this.camera.position.setFromSpherical(this.spherical);
-            this.camera.lookAt(0, 0, 0);
+            restoreCleanState();
             resolve();
             return;
           }
 
           const progress = Math.min(1, (now - startTime) / duration);
 
-          // Find current segment in waypoints
+          // 1. Camera inspection orbit interpolation
           let segIdx = 0;
           for (let i = 0; i < waypoints.length - 1; i++) {
             if (progress >= waypoints[i].t && progress <= waypoints[i + 1].t) {
@@ -389,7 +518,6 @@
           const wp1 = waypoints[segIdx + 1];
           const segSpan = Math.max(0.0001, wp1.t - wp0.t);
           const localT = Math.min(1, Math.max(0, (progress - wp0.t) / segSpan));
-          // Smooth cosine ease-in-out between waypoints
           const ease = 0.5 - 0.5 * Math.cos(Math.PI * localT);
 
           const dTheta = wp0.dTheta + (wp1.dTheta - wp0.dTheta) * ease;
@@ -401,12 +529,50 @@
           this.camera.position.setFromSpherical(this.spherical);
           this.camera.lookAt(0, 0, 0);
 
+          // 2. Flashy 3-pulse glow & pop-out effect on the step's goal pieces
+          const envelope = Math.sin(progress * Math.PI); // Smooth fade-in and fade-out
+          const pulse = Math.pow(Math.sin(progress * Math.PI * 3), 2); // 3 vivid pulses
+
+          if (this.ringMat) {
+            this.ringMat.opacity = 0.14 + 0.55 * pulse * envelope;
+          }
+
+          for (const item of cubieTargets) {
+            const popFactor = item.hasGoalSticker ? (1 + 0.08 * pulse * envelope) : 1.0;
+            item.meshGroup.position.set(
+              item.gx * spacing * popFactor,
+              item.gy * spacing * popFactor,
+              item.gz * spacing * popFactor
+            );
+
+            for (const f of item.faceEntries) {
+              if (!f.isExternal) continue;
+              if (f.isGoal) {
+                f.mat.color.copy(f.baseColor);
+                f.mat.emissive.setHex(f.emissiveHex);
+                f.mat.emissiveIntensity = 0.95 * pulse * envelope;
+
+                const sScale = 1 + 0.12 * pulse * envelope;
+                if (f.sMesh) f.sMesh.scale.set(sScale, sScale, 1);
+
+                if (f.hMat) {
+                  f.hMat.color.setHex(f.haloHex);
+                  f.hMat.opacity = 0.95 * pulse * envelope;
+                }
+                const hScale = 1 + 0.16 * pulse * envelope;
+                if (f.hMesh) f.hMesh.scale.set(hScale, hScale, 1);
+              } else {
+                // Dim non-goal stickers slightly so the glowing goal pattern stands out sharply
+                const dimScale = 1 - 0.68 * envelope;
+                f.mat.color.copy(f.baseColor).multiplyScalar(dimScale);
+              }
+            }
+          }
+
           if (progress < 1) {
             requestAnimationFrame(tick);
           } else {
-            this.spherical.copy(baseSpherical);
-            this.camera.position.setFromSpherical(this.spherical);
-            this.camera.lookAt(0, 0, 0);
+            restoreCleanState();
             resolve();
           }
         };

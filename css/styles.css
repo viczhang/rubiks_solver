@@ -765,6 +765,14 @@ body {
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
+  transition: box-shadow 0.25s ease, border-color 0.25s ease, background 0.25s ease;
+}
+
+#active-move-banner.movie-caption-box.banner-inspecting-glow {
+  border-color: rgba(0, 240, 255, 0.75);
+  border-left: 4px solid #00f0ff;
+  background: linear-gradient(135deg, rgba(16, 36, 52, 0.96), rgba(20, 25, 38, 0.96));
+  box-shadow: 0 0 18px rgba(0, 240, 255, 0.35), inset 0 0 14px rgba(252, 224, 0, 0.12);
 }
 
 .banner-solved {
@@ -812,6 +820,12 @@ body {
   font-size: 0.7rem;
   white-space: nowrap;
   flex-shrink: 0;
+}
+
+.stage-tag.stage-tag-glow {
+  background: linear-gradient(90deg, #00f0ff, #fce000);
+  color: #05070c;
+  box-shadow: 0 0 12px rgba(0, 240, 255, 0.65);
 }
 
 .front-indicator {
