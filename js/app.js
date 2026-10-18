@@ -487,7 +487,7 @@
         if (!(await interruptibleWait(Math.round(320 / speed), myToken))) break;
         await appState.view3d.inspectCubeGesture(
           justCompleted.stageNumber,
-          1750,
+          2400,
           () => !appState.isPlaying || appState.playToken !== myToken
         );
         if (!(await interruptibleWait(Math.round(280 / speed), myToken))) break;
@@ -517,12 +517,42 @@
     updateTimelineUI();
   }
 
+  function setViewportGoalGlowBadge(stageNumber) {
+    const vpWrapper = document.querySelector('.viewport-wrapper');
+    if (!vpWrapper) return;
+    let badgeEl = vpWrapper.querySelector('.viewport-goal-glow-badge');
+    if (!stageNumber) {
+      vpWrapper.classList.remove('viewport-glow-active');
+      if (badgeEl) badgeEl.remove();
+      return;
+    }
+    const GOAL_BADGE_TITLES = {
+      1: '✨ STEP 1 GOAL: WHITE DAISY ✨',
+      2: '✨ STEP 2 GOAL: WHITE CROSS ✨',
+      3: '✨ STEP 3 GOAL: WHITE CORNERS ✨',
+      4: '✨ STEP 4 GOAL: MIDDLE LAYER ✨',
+      5: '✨ STEP 5 GOAL: YELLOW CROSS ✨',
+      6: '✨ STEP 6 GOAL: YELLOW FACE ✨',
+      7: '✨ STEP 7 GOAL: YELLOW CORNERS ✨',
+      8: '🎉 STEP 8 GOAL: CUBE SOLVED! 🎉'
+    };
+    vpWrapper.classList.add('viewport-glow-active');
+    if (!badgeEl) {
+      badgeEl = document.createElement('div');
+      badgeEl.className = 'viewport-goal-glow-badge';
+      vpWrapper.appendChild(badgeEl);
+    }
+    badgeEl.textContent = GOAL_BADGE_TITLES[stageNumber] || `✨ STEP ${stageNumber} COMPLETE ✨`;
+  }
+
   function updateTimelineUI() {
     const sol = appState.solution;
     const playBtn = document.getElementById('btn-play-pause');
     const progressText = document.getElementById('timeline-progress-text');
     const progressBar = document.getElementById('timeline-progress-fill');
     const activeBanner = document.getElementById('active-move-banner');
+
+    setViewportGoalGlowBadge(appState.inspectingStageNumber);
 
     if (playBtn) {
       playBtn.innerHTML = appState.isPlaying
@@ -980,7 +1010,9 @@
           renderMiniNet(appState.cube);
           await new Promise(r => setTimeout(r, 120));
         }
-        await appState.view3d.inspectCubeGesture(step.number, 1650);
+        setViewportGoalGlowBadge(step.number);
+        await appState.view3d.inspectCubeGesture(step.number, 2200);
+        setViewportGoalGlowBadge(null);
       });
     }
 
